@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeGuard Sensor</title>
+<style>
+  body { margin:0; background:#0d1117; color:#e6edf3; font:16px system-ui, sans-serif;
+         display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; box-sizing:border-box; text-align:center; }
+  h1 { margin:0 0 6px; } h1 span { color:#4f8cff; }
+  p { color:#8b949e; margin:4px 0 18px; }
+  button { font-size:20px; font-weight:700; padding:18px 30px; border-radius:14px; border:0; background:#4f8cff; color:#fff; width:100%; max-width:340px; }
+  button.stop { background:#f85149; }
+  .stat { font-size:42px; font-weight:800; margin-top:24px; }
+  .lbl { color:#8b949e; font-size:13px; text-transform:uppercase; letter-spacing:1px; }
+  #state { margin-top:16px; font-weight:600; }
+  input { margin-top:10px; padding:8px; border-radius:8px; border:1px solid #30363d; background:#161b22; color:#e6edf3; width:120px; text-align:center; }
+</style>
+</head>
+<body>
+  <h1>Vibe<span>Guard</span> sensor</h1>
+  <p>Fix the phone firmly on the machine (tape it), then press start.</p>
+  <button id="btn">Start streaming</button>
+  <div><span class="lbl">Machine ID</span><br><input id="mid" value="M1"></div>
+  <div id="state">Idle</div>
+  <div class="stat" id="rate">0</div><div class="lbl">samples / s</div>
+  <div class="stat" id="mag">0.00</div><div class="lbl">|a| m/s²</div>
+
+<script>
+let ws = null, running = false, buf = [], count = 0, wakeLock = null;
+const $ = id => document.getElementById(id);
+
+function onMotion(e) {
+  const a = e.acceleration && e.acceleration.x != null ? e.acceleration : e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  buf.push([performance.timeOrigin + performance.now(), a.x, a.y, a.z]);
+  count++;
+  $("mag").textContent = Math.hypot(a.x, a.y, a.z).toFixed(2);
+}
+
+function openWs() {
+  const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host +
+              "/ws/sensor?machine=" + encodeURIComponent($("mid").value || "M1");
+  ws = new WebSocket(url);
+  ws.onopen = () => $("state").textContent = "🟢 Streaming to dashboard";
+  ws.onclose = () => { $("state").textContent = "🔴 Disconnected — retrying"; if (running) setTimeout(openWs, 1000); };
+}
+
+async function start() {
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+    const p = await DeviceMotionEvent.requestPermission();   // iOS
+    if (p !== "granted") { $("state").textContent = "Motion permission denied"; return; }
+  }
+  if (!window.isSecureContext) $("state").textContent = "⚠️ Needs HTTPS (use the tunnel URL)";
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  running = true;
+  window.addEventListener("devicemotion", onMotion);
+  openWs();
+  $("btn").textContent = "Stop"; $("btn").classList.add("stop");
+}
+
+function stop() {
+  running = false;
+  window.removeEventListener("devicemotion", onMotion);
+  if (ws) ws.close();
+  if (wakeLock) wakeLock.release();
+  $("btn").textContent = "Start streaming"; $("btn").classList.remove("stop");
+  $("state").textContent = "Stopped";
+}
+
+$("btn").onclick = () => running ? stop() : start();
+
+setInterval(() => {                       // send a batch every 100 ms
+  if (running && ws && ws.readyState === 1 && buf.length) {
+    ws.send(JSON.stringify({ samples: buf }));
+    buf = [];
+  }
+}, 100);
+setInterval(() => { $("rate").textContent = count; count = 0; }, 1000);
+</script>
+</body>
+</html>

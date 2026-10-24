@@ -1,0 +1,16 @@
+# VibeGuard settings. Paste your free OpenRouter key below, save, then restart the server.
+
+# --- Free AI (recommended): OpenRouter, Google's open Gemma model ---
+LLM_API_KEY=sk-or-v1-paste-your-key-here
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=google/gemma-4-31b-it:free
+LLM_FALLBACK_MODEL=openrouter/free
+
+# --- Alternative free provider: Groq (uncomment and comment the 3 OpenRouter lines above) ---
+# LLM_API_KEY=sk-or-v1-paste-your-key-here
+# LLM_BASE_URL=https://api.groq.com/openai/v1
+# LLM_MODEL=moonshotai/kimi-k2-instruct
+# LLM_FALLBACK_MODEL=moonshotai/kimi-k2-instruct-0905
+
+# --- Phone link: paste your cloudflared https URL here (optional, the dashboard detects it when you open it from the tunnel) ---
+# PUBLIC_URL=https://something-random.trycloudflare.com

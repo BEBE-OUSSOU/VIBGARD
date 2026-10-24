@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeGuard — Predictive Maintenance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e;
+          --ok:#2ea043; --warn:#d29922; --crit:#f85149; --accent:#4f8cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:14px 22px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; letter-spacing:.3px; }
+  header h1 span { color:var(--accent); }
+  .sub { color:var(--muted); font-size:13px; }
+  .grow { flex:1; }
+  .pill { padding:4px 10px; border-radius:999px; font-weight:600; font-size:12px; border:1px solid var(--line); }
+  main { display:grid; grid-template-columns: 300px 1fr 1fr; gap:14px; padding:14px 22px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin:0 0 10px; }
+  .health { font-size:72px; font-weight:800; line-height:1; }
+  .status { font-size:18px; font-weight:700; margin-top:6px; text-transform:uppercase; }
+  .healthy { color:var(--ok); } .warning { color:var(--warn); } .critical { color:var(--crit); } .idle,.calibrating { color:var(--muted); }
+  button, select { background:#21262d; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 12px; font-weight:600; cursor:pointer; width:100%; margin-top:8px; font-size:14px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger.on { background:var(--crit); border-color:var(--crit); }
+  button.on { background:#1f6feb33; border-color:var(--accent); }
+  .progress { height:6px; background:#21262d; border-radius:4px; overflow:hidden; margin-top:10px; }
+  .progress > div { height:100%; width:0; background:var(--accent); transition:width .3s; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:5px 6px; border-bottom:1px solid var(--line); text-align:right; }
+  td:first-child, th:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  .log { max-height:220px; overflow:auto; font-size:13px; }
+  .log div { padding:5px 0; border-bottom:1px solid var(--line); }
+  .log .ok { color:var(--ok); } .log .warn { color:var(--warn); } .log .crit { color:var(--crit); } .log .info { color:var(--muted); }
+  .span2 { grid-column: span 2; } .span3 { grid-column: span 3; }
+  #report { white-space:normal; }
+  #report h3 { margin:6px 0; font-size:18px; }
+  #report ul { margin:6px 0 10px 18px; padding:0; }
+  .wo { border:1px dashed var(--accent); border-radius:8px; padding:10px; margin-top:8px; }
+  .muted { color:var(--muted); }
+  #qr { background:#fff; padding:6px; border-radius:6px; width:max-content; margin-top:8px; }
+  .chart-box { position:relative; height:220px; }
+  @media (max-width: 1000px) { main { grid-template-columns:1fr; } .span2,.span3 { grid-column:auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vibe<span>Guard</span></h1>
+  <div class="sub" id="machineName">Water pump P-101</div>
+  <div class="grow"></div>
+  <span class="pill" id="sensorPill">Sensor: offline</span>
+  <span class="pill" id="fsPill">— Hz</span>
+</header>
+
+<main>
+  <!-- left column -->
+  <div class="card" style="grid-row: span 2;">
+    <h2>Machine health</h2>
+    <div class="health" id="health">—</div>
+    <div class="status idle" id="status">idle</div>
+    <div class="progress"><div id="calibBar"></div></div>
+
+    <button class="primary" id="btnCalib">1 · Learn healthy baseline</button>
+    <button id="btnSim">Simulator: OFF</button>
+    <button class="danger" id="btnFault">Inject fault (sim)</button>
+
+    <h2 style="margin-top:18px">AI technician</h2>
+    <select id="lang">
+      <option>English</option><option>Türkçe</option><option>Français</option>
+    </select>
+    <button class="primary" id="btnDiag">2 · Diagnose &amp; create work order</button>
+
+    <h2 style="margin-top:18px">Attach a phone sensor</h2>
+    <div class="muted" id="phoneUrl"></div>
+    <div id="qr"></div>
+  </div>
+
+  <div class="card span2">
+    <h2>Health score &amp; vibration RMS</h2>
+    <div class="chart-box"><canvas id="trend"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Live spectrum (FFT)</h2>
+    <div class="chart-box"><canvas id="spec"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Features vs baseline</h2>
+    <table id="feat"><thead><tr><th>Feature</th><th>Base</th><th>Now</th><th>σ</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card span2">
+    <h2>AI diagnosis &amp; work order</h2>
+    <div id="report" class="muted">Calibrate, then click “Diagnose”. Uses Gemini → Gemma (Ollama) → offline rule engine.</div>
+  </div>
+
+  <div class="card">
+    <h2>Event log</h2>
+    <div class="log" id="log"></div>
+  </div>
+</main>
+
+<script>
+const LABELS = { rms:"RMS", peak:"Peak", crest:"Crest", kurtosis:"Kurtosis", dom_freq:"Dom. freq (Hz)",
+                 band_1:"Band 1", band_2:"Band 2", band_3:"Band 3", band_4:"Band 4" };
+const $ = id => document.getElementById(id);
+let simOn = false, faultOn = false;
+
+// phone link + QR
+fetch("/api/info").then(r => r.json()).then(info => {
+  $("phoneUrl").innerHTML = `<a href="${info.phone_url}" target="_blank" style="color:inherit;word-break:break-all">${info.phone_url}</a>` +
+    (info.https ? "" : `<br><span class="warning">⚠ Not HTTPS: phones block the motion sensor. Run the tunnel and open the dashboard from the https link.</span>`) +
+    `<br><span class="muted">AI model: ${info.ai}</span>`;
+  try { new QRCode($("qr"), { text: info.phone_url, width: 140, height: 140 }); }
+  catch (e) { $("qr").textContent = "QR library did not load (no internet?). Type the link on the phone."; }
+});
+
+// charts
+Chart.defaults.color = "#8b949e"; Chart.defaults.borderColor = "#30363d";
+const trend = new Chart($("trend"), {
+  type: "line",
+  data: { labels: [], datasets: [
+    { label: "Health", data: [], yAxisID: "y", borderColor: "#2ea043", tension: .3, pointRadius: 0 },
+    { label: "RMS (m/s²)", data: [], yAxisID: "y1", borderColor: "#4f8cff", tension: .3, pointRadius: 0 } ] },
+  options: { animation: false, maintainAspectRatio: false,
+    scales: { y: { min: 0, max: 100, position: "left" }, y1: { position: "right", grid: { drawOnChartArea: false } } } }
+});
+const spec = new Chart($("spec"), {
+  type: "bar",
+  data: { labels: [], datasets: [{ label: "Amplitude", data: [], backgroundColor: "#4f8cff" }] },
+  options: { animation: false, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    scales: { x: { title: { display: true, text: "Hz" }, ticks: { maxTicksLimit: 10 } } } }
+});
+
+function addEvents(evs) {
+  for (const e of (evs || []).slice().reverse()) {
+    const d = document.createElement("div");
+    d.className = e.level;
+    d.textContent = new Date(e.ts * 1000).toLocaleTimeString() + "  " + e.text;
+    $("log").prepend(d);
+  }
+}
+
+function render(m) {
+  $("fsPill").textContent = m.fs + " Hz";
+  $("status").className = "status " + m.status;
+  $("status").textContent = m.status;
+  if (m.mode === "monitoring") {
+    $("health").textContent = Math.round(m.health);
+    $("health").className = "health " + m.status;
+    $("calibBar").style.width = "100%";
+  } else if (m.mode === "calibrating") {
+    $("health").textContent = "…";
+    $("calibBar").style.width = Math.round((m.calib_progress || 0) * 100) + "%";
+  }
+  // trend
+  const t = new Date(m.ts * 1000).toLocaleTimeString();
+  trend.data.labels.push(t);
+  trend.data.datasets[0].data.push(m.mode === "monitoring" ? m.health : null);
+  trend.data.datasets[1].data.push(m.features.rms);
+  if (trend.data.labels.length > 120) { trend.data.labels.shift(); trend.data.datasets.forEach(d => d.data.shift()); }
+  const col = { healthy: "#2ea043", warning: "#d29922", critical: "#f85149" }[m.status] || "#8b949e";
+  trend.data.datasets[0].borderColor = col;
+  trend.update();
+  // spectrum
+  spec.data.labels = m.freqs.slice(1).map(f => f.toFixed(1));
+  spec.data.datasets[0].data = m.spectrum.slice(1);
+  spec.update();
+  // features table
+  const tb = $("feat").querySelector("tbody"); tb.innerHTML = "";
+  for (const k of Object.keys(LABELS)) {
+    const z = m.z ? m.z[k] : null;
+    const base = m.baseline ? m.baseline[k] : null;
+    const zc = z == null ? "" : (z > 5 ? "critical" : z > 3 ? "warning" : "healthy");
+    tb.insertAdjacentHTML("beforeend",
+      `<tr><td>${LABELS[k]}</td><td>${base == null ? "—" : (+base).toFixed(3)}</td>
+       <td>${(+m.features[k]).toFixed(3)}</td><td class="${zc}">${z == null ? "—" : z.toFixed(1)}</td></tr>`);
+  }
+  addEvents(m.events);
+}
+
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/dashboard");
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "metrics") render(m);
+    else if (m.type === "event") addEvents(m.events);
+    else if (m.type === "sensor") {
+      $("sensorPill").textContent = "Sensor: " + (m.connected ? "phone live" : "offline");
+      $("sensorPill").style.borderColor = m.connected ? "#2ea043" : "#30363d";
+    } else if (m.type === "hello") {
+      $("machineName").textContent = m.name + " · " + m.kind;
+      addEvents(m.events);
+      simOn = m.sim; faultOn = m.fault; paintSim();
+    }
+  };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+connect();
+
+const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify(body) }).then(r => r.json());
+function paintSim() {
+  $("btnSim").textContent = "Simulator: " + (simOn ? "ON" : "OFF");
+  $("btnSim").classList.toggle("on", simOn);
+  $("btnFault").classList.toggle("on", faultOn);
+  $("btnFault").textContent = faultOn ? "Remove fault (sim)" : "Inject fault (sim)";
+}
+$("btnCalib").onclick = () => { $("calibBar").style.width = "0"; post("/api/calibrate", { machine: "M1" }); };
+$("btnSim").onclick = async () => { simOn = !simOn; await post("/api/sim", { on: simOn, fault: faultOn }); paintSim(); };
+$("btnFault").onclick = async () => { faultOn = !faultOn; await post("/api/sim", { on: simOn, fault: faultOn }); paintSim(); };
+
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const list = a => "<ul>" + (a || []).map(x => `<li>${esc(x)}</li>`).join("") + "</ul>";
+$("btnDiag").onclick = async () => {
+  $("report").innerHTML = '<span class="muted">AI technician is analysing the vibration signature…</span>';
+  const r = await post("/api/diagnose", { machine: "M1", lang: $("lang").value });
+  if (!r.report) { $("report").textContent = r.error || "No report"; return; }
+  const p = r.report, w = p.work_order || {};
+  const sevClass = { low: "healthy", medium: "warning", high: "critical", critical: "critical" }[p.severity] || "";
+  $("report").innerHTML = `
+    <div class="muted">Source: ${esc(r.source)}</div>
+    ${r.errors && r.errors.length ? `<div class="warning" style="font-size:12px">Fallback used: ${esc(r.errors.join(" | ").slice(0, 300))}</div>` : ""}
+    <h3 class="${sevClass}">${esc(p.diagnosis)}</h3>
+    <div>Severity: <b class="${sevClass}">${esc(p.severity)}</b> · Confidence: ${esc(p.confidence)}</div>
+    <b>Likely causes</b>${list(p.likely_causes)}
+    <b>Recommended actions</b>${list(p.recommended_actions)}
+    <div class="wo"><b>🛠 Work order — ${esc(w.title || "")}</b><br>
+      Priority <b>${esc(w.priority || "")}</b> · Deadline ${esc(w.deadline || "")} · Downtime ${esc(w.estimated_downtime || "")}
+      <br><b>Spare parts</b>${list(w.spare_parts)}<b>Safety</b>${list(w.safety_notes)}</div>
+    <p><b>Risk if ignored:</b> ${esc(p.risk_if_ignored || "")}</p>`;
+};
+</script>
+</body>
+</html>
